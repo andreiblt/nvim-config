@@ -17,6 +17,19 @@ vim.lsp.config("tombi", {
 })
 vim.lsp.enable("tombi")
 
+vim.lsp.config("rumdl", {
+  cmd = { "rumdl", "server" },
+  filetypes = { "markdown" },
+  root_markers = { ".git", ".rumdl.toml" },
+  settings = {
+    rumdl = {
+      lineLength = 100,
+    },
+  },
+})
+
+vim.lsp.enable("rumdl")
+
 vim.lsp.config("codebook", {
     cmd = { "codebook-lsp", "serve" },
     filetypes = {
@@ -162,36 +175,78 @@ vim.api.nvim_create_autocmd("LspAttach", {
     if client:supports_method("textDocument/inlayHint") then
       vim.lsp.inlay_hint.enable(true, { bufnr = args.buf })
     end
+	if client:supports_method("textDocument/documentHighlight", args.buf) then
+	  local group = vim.api.nvim_create_augroup(
+	    "lsp-document-highlight-" .. args.buf,
+	    { clear = true }
+	  )
 
-    if client:supports_method("textDocument/documentHighlight") then
-      local group = vim.api.nvim_create_augroup("lsp-document-highlight-" .. args.buf, { clear = true })
+	  vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
+	    buffer = args.buf,
+	    group = group,
+	    callback = function()
+	      -- Check again at execution time.
+	      for _, attached_client in ipairs(vim.lsp.get_clients({ bufnr = args.buf })) do
+		if attached_client:supports_method(
+		  "textDocument/documentHighlight",
+		  args.buf
+		) then
+		  vim.lsp.buf.document_highlight()
+		  return
+		end
+	      end
+	    end,
+	  })
 
-      vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
-        buffer = args.buf,
-        group = group,
-        callback = vim.lsp.buf.document_highlight,
-      })
+	  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "BufLeave" }, {
+	    buffer = args.buf,
+	    group = group,
+	    callback = function()
+	      vim.lsp.buf.clear_references()
+	    end,
+	  })
 
-      vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "BufLeave" }, {
-        buffer = args.buf,
-        group = group,
-        callback = vim.lsp.buf.clear_references,
-      })
-
-      vim.api.nvim_create_autocmd("LspDetach", {
-        buffer = args.buf,
-        group = group,
-        callback = function()
-          vim.lsp.buf.clear_references()
-          vim.api.nvim_clear_autocmds({ group = group, buffer = args.buf })
-        end,
-      })
-    end
+	  vim.api.nvim_create_autocmd("LspDetach", {
+	    buffer = args.buf,
+	    group = group,
+	    callback = function()
+	      vim.lsp.buf.clear_references()
+	    end,
+	  })
+	end
   end,
 })
-vim.api.nvim_create_autocmd("BufWritePre", {
+local rust_format_group = vim.api.nvim_create_augroup("rust-format-on-save", { clear = true })
+
+
+vim.api.nvim_create_autocmd("BufWritePost", {
+  group = rust_format_group,
   pattern = "*.rs",
-  callback = function()
-    vim.lsp.buf.format({ async = false })
+  callback = function(args)
+    local project_root = vim.fs.root(args.buf, "Cargo.toml")
+    local result = vim.system({ "cargo", "fmt",
+    -- local result = vim.system({
+    -- "cargo",
+    -- "+nightly",
+    -- "fmt",
+    -- "--",
+    -- "--config-path",
+    -- vim.fn.expand("~/.config/rustfmt/rustfmt.toml"),
+}, {
+      cwd = project_root or vim.fs.dirname(args.file),
+      text = true,
+    }):wait()
+
+    if result.code ~= 0 then
+      local message = vim.trim(result.stderr or "")
+      vim.notify(message ~= "" and message or "cargo +nightly fmt failed", vim.log.levels.ERROR, {
+        title = "Rust format",
+      })
+      return
+    end
+
+    vim.api.nvim_buf_call(args.buf, function()
+      vim.cmd("silent noautocmd checktime")
+    end)
   end,
 })

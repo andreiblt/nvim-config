@@ -6,7 +6,7 @@ return {
     { "<leader>np", "<cmd>NoNeckPain<cr>", desc = "Toggle No Neck Pain" },
   },
   opts = {
-    width = 120,
+    width = 240,
 
     autocmds = {
       -- enableOnVimEnter = true,
